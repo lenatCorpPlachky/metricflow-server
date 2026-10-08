@@ -30,6 +30,11 @@ snowflake = ["dbt-snowflake>=1.7"]
 [project.scripts]
 metricflow-server = "metricflow_server.main:cli"
 
+# Local P1b development uses the sibling MetricFlow source fork. Release builds
+# replace this path override with the published, immutable engine tag.
+[tool.uv.sources]
+metricflow = { path = "../mf-metricflow-p1b", editable = true }
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/metricflow_server"]
 

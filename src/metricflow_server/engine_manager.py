@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import tempfile
@@ -121,8 +122,10 @@ class EngineManager:
             self._refresh_error = None
 
         logger.info("Parsing semantic manifest …")
+        manifest_document = json.loads(manifest_json)
+        advanced_queries = manifest_document.pop("factory_advanced_queries", [])
         semantic_manifest = parse_manifest_from_dbt_generated_manifest(
-            manifest_json_string=manifest_json
+            manifest_json_string=json.dumps(manifest_document)
         )
         lookup = SemanticManifestLookup(semantic_manifest)
         client = (
@@ -133,6 +136,7 @@ class EngineManager:
         engine = MetricFlowEngine(
             semantic_manifest_lookup=lookup,
             sql_client=client,
+            factory_advanced_queries=advanced_queries,
         )
         ready = threading.Event() if isinstance(self._engine, ManagedEngine) else None
         with self._lock:
