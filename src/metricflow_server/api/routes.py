@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from dbt_semantic_interfaces.type_enums import DimensionType
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from metricflow.engine.metricflow_engine import MetricFlowQueryRequest
+from metricflow_semantic_interfaces.type_enums import DimensionType
 from metricflow_semantics.errors.error_classes import (
     CustomerFacingSemanticException,
     ExecutionException,
@@ -74,7 +74,7 @@ def health(response: Response):
 def query(body: QueryRequest):
     engine = _require_engine()
 
-    mf_request = MetricFlowQueryRequest.create_with_random_request_id(
+    mf_request = MetricFlowQueryRequest.create(
         metric_names=body.metrics,
         group_by_names=body.group_by,
         where_constraints=body.where,

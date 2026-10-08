@@ -38,7 +38,7 @@ def mock_engine():
     dim.qualified_name = "location__location_name"
     dim.description = None
     dim.label = None
-    from dbt_semantic_interfaces.type_enums import DimensionType
+    from metricflow_semantic_interfaces.type_enums import DimensionType
     dim.type = DimensionType.CATEGORICAL
     dim.type_params = None
     metric.dimensions = [dim]

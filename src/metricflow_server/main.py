@@ -38,6 +38,7 @@ async def lifespan(app: FastAPI):
         else:
             yield
     finally:
+        engine_manager.close()
         settings.cleanup_profiles_dir()
 
 
