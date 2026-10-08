@@ -25,8 +25,14 @@ the DuckDB SQL plan renderer. The client accepts a dbt `BaseAdapter`, opens
 `adapter.execute`, and returns `MetricFlowDataTable`. It also implements
 `execute`, `dry_run`, and `close`. Thus a custom MetricFlow `SqlClient` or SQL
 dialect is unnecessary for normal DuckDB queries. The fork needs the
-`dbt-duckdb` extra, a profile with `type: duckdb` and `read_only: true`, and
-connection lifecycle handling on snapshot replacement.
+`dbt-duckdb` extra, a profile with `type: duckdb` and
+`config_options: {access_mode: READ_ONLY}`, and connection lifecycle handling
+on snapshot replacement. In dbt-duckdb 1.11.0, top-level `read_only: true`
+does not control the primary connection. The local environment calls
+`duckdb.connect(..., read_only=False, config=config_options)`. The pinned
+`access_mode` option was verified with `current_setting('access_mode') ==
+'read_only'` and an actual `CREATE TABLE` rejection. Startup checks both the
+profile value and effective connection setting.
 
 dbt-duckdb 1.11.0 keeps a process-global `DuckDBConnectionManager._ENV`.
 Creating a new adapter by itself does not reopen the replaced path. The
@@ -35,6 +41,10 @@ that environment, then releases queries on the new adapter. An in-flight
 query may finish with the old snapshot; its successor sees the replacement.
 The reset currently uses dbt-duckdb's private `_ENV` and `_LOCK` attributes,
 which must be rechecked if the pinned adapter version changes.
+If a reset fails, the manager marks itself unavailable and pending queries
+raise a refresh error. A later refresh retries the environment reset before
+serving the replacement snapshot. Shutdown waits for active queries to drain,
+closes the underlying environment, and prevents later refreshes.
 
 The pinned MetricFlow 0.213.0 engine constructor accepts
 `SemanticManifestLookup` and `SqlClient` as above. Its query request factory is
@@ -46,6 +56,8 @@ required in addition to adapter registration.
 The dimension enum also moved from `dbt_semantic_interfaces.type_enums` to
 `metricflow_semantic_interfaces.type_enums`; the old import fails in a clean
 installation of the pinned stack.
+Both optional MCP query tools use the same `MetricFlowQueryRequest.create(...)`
+factory and run in CI with the `mcp` and `duckdb` extras installed.
 
 ## Snapshot lifecycle
 

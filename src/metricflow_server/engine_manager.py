@@ -35,11 +35,15 @@ class EngineManager:
         self._adapter_type = None
         self._lock = threading.Lock()
         self._refresh_lock = threading.Lock()
+        self._closed = False
+        self._refresh_error: Exception | None = None
 
     # ------------------------------------------------------------------
     # Adapter bootstrap
     # ------------------------------------------------------------------
     def init_adapter(self, profiles_dir: Path) -> None:
+        if self._closed:
+            raise RuntimeError("Engine manager is closed")
         tmpdir = tempfile.mkdtemp(prefix="mfserver_")
         try:
             dbt_project = (
@@ -72,8 +76,23 @@ class EngineManager:
                 )
 
             profile = load_profile(project_root=tmpdir, cli_vars={})
+            if profile.credentials.type == "duckdb":
+                access_mode = (profile.credentials.config_options or {}).get(
+                    "access_mode"
+                )
+                if str(access_mode).upper() != "READ_ONLY":
+                    raise ValueError(
+                        "DuckDB snapshot profile requires config_options.access_mode: READ_ONLY"
+                    )
             load_project(tmpdir, version_check=False, profile=profile)
             adapter = get_adapter_by_type(profile.credentials.type)
+            if profile.credentials.type == "duckdb":
+                with adapter.connection_named("metricflow_snapshot_access_check"):
+                    _, access_table = adapter.execute(
+                        "select current_setting('access_mode')", fetch=True
+                    )
+                if str(access_table.rows[0][0]).lower() != "read_only":
+                    raise RuntimeError("DuckDB snapshot connection is not read-only")
             self._sql_client = AdapterBackedSqlClient(adapter)
             self._adapter_type = profile.credentials.type
             logger.info("Adapter initialised (type=%s)", profile.credentials.type)
@@ -88,10 +107,18 @@ class EngineManager:
             self._load_manifest(manifest_json)
 
     def _load_manifest(self, manifest_json: str) -> None:
+        if self._closed:
+            raise RuntimeError("Engine manager is closed")
         if self._sql_client is None:
             raise RuntimeError("Adapter not initialised – call init_adapter first")
         if isinstance(self._engine, ManagedEngine):
             self._engine._ready.wait()
+        if self._refresh_error is not None:
+            try:
+                reopen_environment(self._sql_client)
+            except Exception as exc:
+                raise RuntimeError("DuckDB snapshot recovery failed") from exc
+            self._refresh_error = None
 
         logger.info("Parsing semantic manifest …")
         semantic_manifest = parse_manifest_from_dbt_generated_manifest(
@@ -118,23 +145,59 @@ class EngineManager:
             self._sql_client = client
         if isinstance(old_engine, ManagedEngine):
 
-            def release_new_engine():
+            def release_new_engine(close_error: Exception | None):
+                error = close_error
                 try:
-                    reopen_environment(old_engine._client)
-                finally:
-                    ready.set()
+                    if error is None:
+                        reopen_environment(old_engine._client)
+                except Exception as exc:  # noqa: BLE001 - mark manager unavailable
+                    error = exc
+                if error is not None:
+                    self._refresh_error = error
+                    new_engine.fail(error)
+                    with self._lock:
+                        if self._engine is new_engine:
+                            self._engine = None
+                    logger.error("DuckDB snapshot refresh failed", exc_info=error)
+                else:
+                    new_engine.release()
 
-            old_engine.retire(self._engine, release_new_engine)
+            new_engine = self._engine
+            old_engine.retire(new_engine, release_new_engine)
+            if self._refresh_error is not None:
+                raise RuntimeError(
+                    "DuckDB snapshot refresh failed"
+                ) from self._refresh_error
         logger.info("MetricFlowEngine reloaded successfully")
 
     def close(self) -> None:
-        with self._lock:
-            old_engine = self._engine
-            self._engine = None
-        if isinstance(old_engine, ManagedEngine):
-            old_engine.retire()
-        elif self._sql_client is not None:
-            self._sql_client.close()
+        with self._refresh_lock:
+            with self._lock:
+                if self._closed:
+                    return
+                self._closed = True
+                old_engine = self._engine
+                client = self._sql_client
+                adapter_type = self._adapter_type
+                self._engine = None
+                self._sql_client = None
+                self._adapter_type = None
+                self._refresh_error = None
+
+            def finish_shutdown(close_error: Exception | None):
+                if adapter_type == "duckdb" and client is not None:
+                    reopen_environment(client)
+                if close_error is not None:
+                    raise RuntimeError("DuckDB client shutdown failed") from close_error
+
+            if isinstance(old_engine, ManagedEngine):
+                old_engine.retire(on_drained=finish_shutdown)
+            elif client is not None:
+                try:
+                    client.close()
+                finally:
+                    if adapter_type == "duckdb":
+                        reopen_environment(client)
 
     # ------------------------------------------------------------------
     # Access
@@ -147,7 +210,11 @@ class EngineManager:
     @property
     def is_ready(self) -> bool:
         with self._lock:
-            return self._engine is not None
+            engine = self._engine
+            return engine is not None and (
+                not isinstance(engine, ManagedEngine)
+                or (engine._ready.is_set() and engine._failure is None)
+            )
 
 
 engine_manager = EngineManager()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 
 from dbt.mp_context import get_mp_context
 from dbt_metricflow.cli.dbt_connectors.adapter_backed_client import (
@@ -37,7 +38,8 @@ class ManagedEngine:
         self._retired = False
         self._closed = False
         self._successor = None
-        self._on_drained = lambda: None
+        self._on_drained: Callable[[Exception | None], None] = lambda _: None
+        self._failure: Exception | None = None
         self._ready = ready or threading.Event()
         if ready is None:
             self._ready.set()
@@ -45,9 +47,39 @@ class ManagedEngine:
     def __getattr__(self, name):
         return getattr(self._engine, name)
 
+    def release(self) -> None:
+        self._ready.set()
+        self._finish_if_drained()
+
+    def fail(self, error: Exception) -> None:
+        self._failure = error
+        self._ready.set()
+        self._finish_if_drained()
+
+    def _finish_if_drained(self) -> None:
+        with self._lock:
+            should_close = (
+                self._retired
+                and self._active == 0
+                and self._ready.is_set()
+                and not self._closed
+            )
+            if should_close:
+                self._closed = True
+                on_drained = self._on_drained
+        if should_close:
+            error = None
+            try:
+                self._client.close()
+            except Exception as exc:  # noqa: BLE001 - callback records retirement failure
+                error = exc
+            on_drained(error)
+
     def query(self, request):
         self._ready.wait()
         with self._lock:
+            if self._failure is not None:
+                raise RuntimeError("DuckDB snapshot refresh failed") from self._failure
             successor = self._successor if self._retired else None
             if successor is None and self._retired:
                 raise RuntimeError("MetricFlow engine is closed")
@@ -60,26 +92,11 @@ class ManagedEngine:
         finally:
             with self._lock:
                 self._active -= 1
-                should_close = self._retired and self._active == 0 and not self._closed
-                if should_close:
-                    self._closed = True
-                    on_drained = self._on_drained
-            if should_close:
-                try:
-                    self._client.close()
-                finally:
-                    on_drained()
+            self._finish_if_drained()
 
-    def retire(self, successor=None, on_drained=lambda: None):
+    def retire(self, successor=None, on_drained=lambda _: None):
         with self._lock:
             self._retired = True
             self._successor = successor
             self._on_drained = on_drained
-            should_close = self._active == 0 and not self._closed
-            if should_close:
-                self._closed = True
-        if should_close:
-            try:
-                self._client.close()
-            finally:
-                on_drained()
+        self._finish_if_drained()

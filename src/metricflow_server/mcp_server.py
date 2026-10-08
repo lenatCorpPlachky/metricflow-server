@@ -109,7 +109,7 @@ def get_dimension_values(
     """
     engine = _require_engine()
 
-    mf_request = MetricFlowQueryRequest.create_with_random_request_id(
+    mf_request = MetricFlowQueryRequest.create(
         metric_names=metrics,
         group_by_names=[dimension],
         order_by_names=[dimension],
@@ -160,7 +160,7 @@ def query_metrics(
     """
     engine = _require_engine()
 
-    mf_request = MetricFlowQueryRequest.create_with_random_request_id(
+    mf_request = MetricFlowQueryRequest.create(
         metric_names=metrics,
         group_by_names=group_by,
         where_constraints=where,
