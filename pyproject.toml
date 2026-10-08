@@ -12,7 +12,7 @@ dependencies = [
     "fastapi>=0.104",
     "uvicorn[standard]>=0.24",
     "pydantic-settings>=2.0",
-    "metricflow==0.213.0",
+    "metricflow @ git+https://github.com/lenatCorpPlachky/metricflow.git@v0.213.0-factory.1",
     "dbt-metricflow==0.15.0",
     "dbt-core==1.12.5",
 ]
@@ -30,10 +30,9 @@ snowflake = ["dbt-snowflake>=1.7"]
 [project.scripts]
 metricflow-server = "metricflow_server.main:cli"
 
-# Local P1b development uses the sibling MetricFlow source fork. Release builds
-# replace this path override with the published, immutable engine tag.
-[tool.uv.sources]
-metricflow = { path = "../mf-metricflow-p1b", editable = true }
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/metricflow_server"]
