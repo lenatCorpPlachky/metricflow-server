@@ -3,6 +3,10 @@ FROM python:3.11-slim
 ARG ADAPTER
 ARG MCP_ENABLED=false
 
+# pip needs git to install MetricFlow from its pinned Git source.
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user
 RUN groupadd --gid 1001 appuser && \
     useradd --uid 1001 --gid appuser --shell /bin/bash --create-home appuser
