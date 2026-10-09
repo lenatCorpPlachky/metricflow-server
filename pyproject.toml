@@ -12,8 +12,9 @@ dependencies = [
     "fastapi>=0.104",
     "uvicorn[standard]>=0.24",
     "pydantic-settings>=2.0",
-    "metricflow>=0.207.3,<0.209.0",
-    "dbt-metricflow>=0.8.2,<0.9.0",
+    "metricflow @ git+https://github.com/lenatCorpPlachky/metricflow.git@v0.213.0-factory.1",
+    "dbt-metricflow==0.15.0",
+    "dbt-core==1.12.5",
 ]
 
 [project.optional-dependencies]
@@ -22,11 +23,16 @@ bigquery = ["dbt-bigquery>=1.7"]
 clickhouse = ["dbt-clickhouse>=1.7"]
 databricks = ["dbt-databricks>=1.7"]
 postgres = ["dbt-postgres>=1.7"]
+duckdb = ["dbt-duckdb==1.11.0"]
 redshift = ["dbt-redshift>=1.7"]
 snowflake = ["dbt-snowflake>=1.7"]
 
 [project.scripts]
 metricflow-server = "metricflow_server.main:cli"
+
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/metricflow_server"]
@@ -37,4 +43,3 @@ dev = [
     "httpx>=0.27",
     "pytest-mock>=3.14",
 ]
-

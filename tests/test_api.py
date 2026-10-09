@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from contextlib import asynccontextmanager, nullcontext
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -17,9 +18,23 @@ ADMIN_KEY = "test-admin-key"
 
 @pytest.fixture
 def client():
-    with patch("metricflow_server.engine_manager.EngineManager.init_adapter"):
-        with TestClient(app, raise_server_exceptions=False) as c:
-            yield c
+    @asynccontextmanager
+    async def test_mcp_lifespan():
+        yield
+
+    from metricflow_server import main as main_module
+
+    mcp_context = (
+        patch.object(main_module.mcp_session_manager, "run", test_mcp_lifespan)
+        if main_module._mcp_available
+        else nullcontext()
+    )
+    with (
+        patch("metricflow_server.engine_manager.EngineManager.init_adapter"),
+        mcp_context,
+        TestClient(app, raise_server_exceptions=False) as c,
+    ):
+        yield c
 
 
 @pytest.fixture
@@ -38,7 +53,8 @@ def mock_engine():
     dim.qualified_name = "location__location_name"
     dim.description = None
     dim.label = None
-    from dbt_semantic_interfaces.type_enums import DimensionType
+    from metricflow_semantic_interfaces.type_enums import DimensionType
+
     dim.type = DimensionType.CATEGORICAL
     dim.type_params = None
     metric.dimensions = [dim]
@@ -128,7 +144,9 @@ def test_list_metrics(client, mock_engine):
     assert len(data) == 1
     assert data[0]["name"] == "revenue"
     assert data[0]["type"] == "MetricType.SIMPLE"
-    assert any(d["qualified_name"] == "location__location_name" for d in data[0]["dimensions"])
+    assert any(
+        d["qualified_name"] == "location__location_name" for d in data[0]["dimensions"]
+    )
 
 
 # ------------------------------------------------------------------
@@ -185,7 +203,9 @@ def test_refresh_invalid_json(client):
 # Query error handling
 # ------------------------------------------------------------------
 def test_query_invalid_query_exception_returns_400(client, mock_engine):
-    from metricflow_semantics.errors.error_classes import CustomerFacingSemanticException
+    from metricflow_semantics.errors.error_classes import (
+        CustomerFacingSemanticException,
+    )
 
     mock_engine.query.side_effect = CustomerFacingSemanticException("unknown metric")
     with patch("metricflow_server.engine_manager.engine_manager._engine", mock_engine):
@@ -233,7 +253,7 @@ def test_serialize_cell_decimal():
 def test_serialize_cell_datetime():
     from metricflow_server.api.schemas import serialize_cell
 
-    dt = datetime.datetime(2024, 1, 15, 12, 0, 0)
+    dt = datetime.datetime(2024, 1, 15, 12, 0, 0)  # noqa: DTZ001 - test naive input
     assert serialize_cell(dt) == "2024-01-15T12:00:00"
 
 
@@ -255,7 +275,6 @@ def test_serialize_cell_none():
 # ------------------------------------------------------------------
 def test_resolve_profiles_dir_b64():
     import base64
-    import tempfile
 
     from metricflow_server.config import Settings
 

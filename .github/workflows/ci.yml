@@ -9,18 +9,21 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --extra duckdb --extra mcp
 
       - name: Run tests
-        run: uv run pytest tests/ -v
+        run: uv run --extra duckdb --extra mcp pytest tests/ -v
         env:
           MF_API_KEY: test-api-key
           MF_ADMIN_KEY: test-admin-key
