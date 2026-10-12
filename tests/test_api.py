@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 from contextlib import asynccontextmanager, nullcontext
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,42 @@ with patch("metricflow_server.engine_manager.EngineManager.init_adapter"):
 
 API_KEY = "test-api-key"
 ADMIN_KEY = "test-admin-key"
+
+
+def test_dimension_serialization_uses_metricflow_qualified_name_attribute():
+    from metricflow_semantic_interfaces.type_enums import DimensionType
+
+    from metricflow_server.api.routes import _serialize_dimension
+
+    dimension = SimpleNamespace(
+        name="page_url", dunder_name="page__page_url", description=None,
+        label="Page URL", type=DimensionType.CATEGORICAL, type_params=None,
+    )
+
+    response = _serialize_dimension(dimension)
+
+    assert response.qualified_name == "page__page_url"
+    assert response.name == "page_url"
+
+
+def test_metrics_endpoint_handles_metricflow_dunder_name(client):
+    from metricflow_semantic_interfaces.type_enums import DimensionType
+
+    dimension = SimpleNamespace(
+        name="page_url", dunder_name="page__page_url", description=None,
+        label="Page URL", type=DimensionType.CATEGORICAL, type_params=None,
+    )
+    metric = SimpleNamespace(
+        name="site__clicks", description=None, type="simple", label=None,
+        dimensions=[dimension],
+    )
+    engine = SimpleNamespace(list_metrics=lambda: [metric])
+
+    with patch("metricflow_server.engine_manager.engine_manager._engine", engine):
+        response = client.get("/api/v1/metrics", headers={"Authorization": f"Bearer {API_KEY}"})
+
+    assert response.status_code == 200
+    assert response.json()[0]["dimensions"][0]["qualified_name"] == "page__page_url"
 
 
 @pytest.fixture

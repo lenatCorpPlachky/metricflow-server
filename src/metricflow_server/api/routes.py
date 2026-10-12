@@ -45,10 +45,15 @@ def _serialize_dimension(d) -> DimensionResponse:
     granularities = []
     if d.type == DimensionType.TIME and d.type_params and d.type_params.time_granularity:
         granularities = [str(d.type_params.time_granularity)]
+    qualified_name = getattr(d, "qualified_name", None)
+    if not isinstance(qualified_name, str):
+        # MetricFlow 0.213 names this property ``dunder_name``; older server
+        # releases and the Semantic Layer SDK use ``qualified_name``.
+        qualified_name = d.dunder_name
 
     return DimensionResponse(
         name=d.name,
-        qualified_name=d.qualified_name,
+        qualified_name=qualified_name,
         description=d.description,
         type=str(d.type),
         label=d.label,
